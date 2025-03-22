@@ -6,5 +6,8 @@ dist/
 wheels/
 *.egg-info
 
+# Payloads
+example_payload.json
+
 # Virtual environments
 .venv

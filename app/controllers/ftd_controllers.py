@@ -1,9 +1,12 @@
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 from redis import Redis
 from rq import Queue
 import time
 import uuid
+import boto3
+
+import json
 
 # Conectar con Redis
 redis_conn = Redis(host='localhost', port=6379, db=0)
@@ -14,17 +17,49 @@ task_router = APIRouter()
 def update_task_status(job_id: str, status: str):
     redis_conn.hset(f"task:{job_id}", mapping={"status": status})
 
-def example_task(job_id: str, duration: int, payload: dict):
+def example_task(payload: dict):
+    job_id = payload["job_id"]
+    task = payload["task"]
     update_task_status(job_id, "running")
-    time.sleep(duration)
+
+    # Nombre del ARN de tu Step Function
+    STATE_MACHINE_ARN = "arn:aws:states:us-east-1:963485456147:stateMachine:FTC-Codelco-MachineState"
+
+
+
+    # Crear cliente
+    sfn = boto3.client("stepfunctions")
+
+    # Ejecutar la Step Function
+    response = sfn.start_execution(
+        stateMachineArn=STATE_MACHINE_ARN,
+        input=json.dumps(task)
+    )
+
+    ok = False
+    while not ok:
+        response = sfn.describe_execution(
+            executionArn=response["executionArn"]
+        )
+        if response["status"] == "RUNNING":
+            time.sleep(5)
+            # Imprimir resultado    
+            print("Ejecución iniciada:")
+            print(response["status"])
+
+        else:
+            ok = True
+
+
     update_task_status(job_id, "completed")
     return {"job_id": job_id, "status": "completed", "payload": payload}
 
 @task_router.post("/tasks/")
-def create_task(duration: int, payload: dict):
+def create_task(payload: list  = Body(...)):
     job_id = str(uuid.uuid4())
+    payload = {"task": payload, "job_id": job_id}
     update_task_status(job_id, "queued")
-    queue.enqueue(example_task, job_id, duration, payload)
+    queue.enqueue(example_task, payload)
     return {"job_id": job_id, "status": "queued", "payload": payload}
 
 @task_router.get("/tasks/{job_id}")
